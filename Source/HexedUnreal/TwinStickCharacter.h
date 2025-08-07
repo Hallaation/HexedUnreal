@@ -98,9 +98,8 @@ protected:
 	/** Game time of the last AoE attack */
 	float LastAoETime = 0.0f;
 
-	/** Aim Yaw Angle in degrees */
-	float AimAngle = 0.0f;
-
+void DoPlayerRotation();
+	
 	/** Pointer to the player controller assigned to this character */
 	TObjectPtr<APlayerController> PlayerController;
 
@@ -110,6 +109,9 @@ protected:
 	/** Last held move input */
 	FVector2D LastMoveInput;
 	
+	/** Aim Yaw Angle in degrees */
+	float AimAngle = 0.0f;
+
 public:
 	
 	/** Constructor */
@@ -172,7 +174,7 @@ public:
 	/** Handles aoe attack inputs from both input actions and touch interface */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	void DoAoEAttack();
-
+	
 public:
 
 	/** Applies collision impact to the player */
@@ -195,5 +197,8 @@ protected:
 	void UpdateItems();
 
 private:
+#ifdef UE_BUILD_DEBUG
 	void DrawDebugAimLine(const FColor InColor, const FVector2d InAxis) const;
+#endif
+	
 };

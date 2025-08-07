@@ -16,6 +16,7 @@
 #include "TwinStickProjectile.h"
 #include "GameFramework/InputDeviceProperties.h"
 #include "Helpers/DebugHelper.h"
+#include "Net/UnrealNetwork.h"
 
 ATwinStickCharacter::ATwinStickCharacter()
 {
@@ -39,7 +40,7 @@ ATwinStickCharacter::ATwinStickCharacter()
 
 	// Camera->SetFieldOfView(75.0f);
 	Camera->SetProjectionMode(ECameraProjectionMode::Orthographic);
-	
+
 	// configure the character movement
 	GetCharacterMovement()->GravityScale = 1.5f;
 	GetCharacterMovement()->MaxAcceleration = 1000.0f;
@@ -48,12 +49,18 @@ ATwinStickCharacter::ATwinStickCharacter()
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 640.0f, 0.0f);
 	GetCharacterMovement()->bConstrainToPlane = true;
 	GetCharacterMovement()->bSnapToPlaneAtStart = true;
+	
 }
 
 void ATwinStickCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	if (PlayerController != nullptr)
+	{
+		PlayerController->SetReplicates(true);
+		PlayerController->SetReplicateMovement(true);
+	}
 	// update the items count
 	UpdateItems();
 }
@@ -66,38 +73,38 @@ void ATwinStickCharacter::NotifyControllerChanged()
 	PlayerController = Cast<APlayerController>(GetController());
 }
 
+void ATwinStickCharacter::DoPlayerRotation()
+{
+	//Check for PlayerController
+	if (PlayerController == nullptr)
+	{
+		return;
+	}
+	
+	// are we aiming with the mouse?
+	if (bUsingMouse)
+	{
+		// get the cursor world location
+		FHitResult OutHit;
+		PlayerController->GetHitResultUnderCursorByChannel(MouseAimTraceChannel, true, OutHit);
+
+		// find the aim rotation 
+		const FRotator AimRot = UKismetMathLibrary::FindLookAtRotation(GetActorLocation(), OutHit.Location);
+		// save the aim angle
+		AimAngle = AimRot.Yaw;
+	}
+
+	const FRotator OldRotation = GetActorRotation();
+	//AimAngle either from controller input event, or earlier when using mouse controls.
+	const FRotator targetRot = FRotator(OldRotation.Pitch, AimAngle, OldRotation.Roll);
+	PlayerController->SetControlRotation(targetRot);
+}
+
+
 void ATwinStickCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-
-	// get the current rotation
-	const FRotator OldRotation = GetActorRotation();
-
-	// are we aiming with the mouse?
-	if (bUsingMouse && false) //always ignore mouse in this case, only for testing
-	{
-		if (PlayerController)
-		{
-			// get the cursor world location
-			FHitResult OutHit;
-			PlayerController->GetHitResultUnderCursorByChannel(MouseAimTraceChannel, true, OutHit);
-
-			// find the aim rotation 
-			const FRotator AimRot = UKismetMathLibrary::FindLookAtRotation(GetActorLocation(), OutHit.Location);
-
-			// save the aim angle
-			AimAngle = AimRot.Yaw;
-
-
-			// update the yaw, reuse the pitch and roll
-			SetActorRotation(FRotator(OldRotation.Pitch, AimAngle, OldRotation.Roll));
-		}
-	}
-	else
-	{
-		const FRotator TargetRot = FRotator(OldRotation.Pitch, AimAngle, OldRotation.Roll);
-		SetActorRotation(TargetRot);
-	}
+	DoPlayerRotation();
 }
 
 void ATwinStickCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -125,10 +132,8 @@ void ATwinStickCharacter::Move(const FInputActionValue& Value)
 	// save the input vector
 	FVector2D InputVector = Value.Get<FVector2D>();
 
-	//Use left stick rotation as our rotation vector if theres input and not in mouse mode.
-	//Might cause problems if the right stick is introduced
-
-	if (/*not bUsingMouse &&*/ InputVector.SquaredLength() > 0)
+	//Use input vector as the rotation when using gamepad
+	if (not bUsingMouse && InputVector.SquaredLength() > 0)
 	{
 		FVector2d RotVector(-InputVector.X, InputVector.Y);
 		DoAim(RotVector.X, RotVector.Y);
@@ -187,16 +192,10 @@ void ATwinStickCharacter::DoMove(float AxisX, float AxisY)
 	// save the input
 	LastMoveInput.X = AxisX;
 	LastMoveInput.Y = AxisY;
-
-	// calculate the forward component of the input
-	FRotator FlatRot = GetControlRotation();
-	FlatRot.Pitch = 0.0f;
-
-	// apply the forward input
-	AddMovementInput(FlatRot.RotateVector(FVector::ForwardVector), AxisX);
-
-	// apply the right input
-	AddMovementInput(FlatRot.RotateVector(FVector::RightVector), AxisY);
+	
+	//Forward/Right vector based on world vectors, not local control vectors, since the rotation is set to the control
+	AddMovementInput(FVector::ForwardVector, AxisX);
+	AddMovementInput(FVector::RightVector, AxisY);
 }
 
 void ATwinStickCharacter::DoAim(float AxisX, float AxisY)
@@ -204,6 +203,7 @@ void ATwinStickCharacter::DoAim(float AxisX, float AxisY)
 	// calculate the aim angle from the inputs
 	AimAngle = FMath::RadiansToDegrees(FMath::Atan2(AxisY, -AxisX));
 
+	//DebugHelper::Log("ATwinStickCharacter::DoAim");
 	// lower the mouse controls flag
 	bUsingMouse = false;
 
@@ -299,9 +299,11 @@ void ATwinStickCharacter::UpdateItems()
 	}
 }
 
+#ifdef UE_BUILD_DEBUG
 void ATwinStickCharacter::DrawDebugAimLine(const FColor InColor, const FVector2d InAxis) const
 {
 	FVector3d actorLoc = GetActorLocation();
 	DrawDebugLine(GetWorld(), actorLoc, actorLoc + (FVector(-InAxis.X, InAxis.Y, 0) * 150), InColor, false, 0,
 	              5);
 }
+#endif
